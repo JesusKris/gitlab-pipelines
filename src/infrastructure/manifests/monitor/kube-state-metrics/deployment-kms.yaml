@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app: kube-state-metrics
+    spec:
+      nodeSelector:
+        node-type: monitoring
+      serviceAccountName: kube-state-metrics-service
+      containers:
+        - name: kube-state-metrics
+          image: bitnami/kube-state-metrics:2.9.2
+          ports:
+            - containerPort: 8080

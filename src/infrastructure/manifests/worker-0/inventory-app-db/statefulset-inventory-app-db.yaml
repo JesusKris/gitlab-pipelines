@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: inventory-app-db-statefulset
+spec:
+  selector:
+    matchLabels:
+      app: inventory-app-db-statefulset
+  serviceName: inventory-app-db-service
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: inventory-app-db-statefulset
+    spec:
+      containers:
+        - name: inventory-database-container
+          image: jesuskris/inventory-database:latest
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -h
+                - localhost
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+          volumeMounts:
+            - name: inventory-database-volume
+              mountPath: /var/lib/postgresql/data
+          env:
+            - name: POSTGRES_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: POSTGRES_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: INVENTORY_POSTGRES_DATABASE
+      nodeSelector:
+        node-type: worker-0
+  volumeClaimTemplates:
+    - metadata:
+        name: inventory-database-volume
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

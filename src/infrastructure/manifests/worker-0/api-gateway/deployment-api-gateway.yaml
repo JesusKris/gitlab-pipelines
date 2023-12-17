@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway-deployment
+spec:
+  selector:
+    matchLabels:
+      app: api-gateway-deployment
+  template:
+    metadata:
+      labels:
+        app: api-gateway-deployment
+    spec:
+      containers:
+        - name: api-gateway-container
+          image: jesuskris/api-gateway:latest
+          resources:
+          env:
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-gateway-secrets
+                  key: API_KEY
+            - name: API_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: api-gateway-configmap
+                  key: API_VERSION
+            - name: API_RATELIMIT_MAX
+              valueFrom:
+                configMapKeyRef:
+                  name: api-gateway-configmap
+                  key: API_RATELIMIT_MAX
+            - name: API_RATELIMIT_DURATION
+              valueFrom:
+                configMapKeyRef:
+                  name: api-gateway-configmap
+                  key: API_RATELIMIT_DURATION
+            - name: EXPRESS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: api-gateway-configmap
+                  key: EXPRESS_PORT
+            - name: MOVIES_IP
+              valueFrom:
+                configMapKeyRef:
+                  name: api-gateway-configmap
+                  key: MOVIES_IP
+            - name: BILLING_IP
+              valueFrom:
+                configMapKeyRef:
+                  name: api-gateway-configmap
+                  key: BILLING_IP
+            - name: RABBITMQ_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_PORT
+            - name: RABBITMQ_QUEUE
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_QUEUE
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_QUEUE
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_QUEUE
+            - name: RABBITMQ_IP
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_IP
+      nodeSelector:
+        node-type: worker-0

@@ -1,0 +1,133 @@
+
+- name: Setting up a group and repositories
+  become: yes
+  vars_files:
+    - ./env.json
+  hosts: "{{GITLAB_HOST}}"
+  vars:
+    variables_to_create:
+      - { key: "AWS_ACCESS_KEY_ID", value: "{{ AWS_ACCESS_KEY_ID }}", protected: false, description: "AWS access key for Terraform" }
+      - { key: "AWS_SECRET_ACCESS_KEY", value: "{{ AWS_SECRET_ACCESS_KEY }}", protected: false, description: "AWS secret access key for Terraform" }
+      - { key: "AWS_REGION", value: "{{ AWS_REGION }}", protected: false, description: "AWS region for Terraform" }
+    
+
+      - { key: "TF_VAR_aws_availability_zone", value: "{{ TF_VAR_aws_availability_zone }}", protected: false, description: "AWS availability zone for Terraform" }
+      - { key: "TF_VAR_security_key", value: "{{ TF_VAR_security_key }}", protected: false, description: "AWS security key for Terraform" }
+      - { key: "TF_VAR_admin_public_ipv4", value: "{{ TF_VAR_admin_public_ipv4 }}", protected: false, description: "AWS admin public ipv4 for Terraform" }
+      - { key: "GROUP_TOKEN", value: "{{ gitlab_token_response.json.token }}", protected: false, description: "Admin group token" }
+
+      - { key: "DOCKER_USERNAME", value: "{{ DOCKER_USERNAME }}", protected: false, description: "Docker username" }
+      - { key: "DOCKER_ACCESS_TOKEN", value: "{{ DOCKER_ACCESS_TOKEN }}", protected: false, description: "Docker access token used to push new images in ci/cd" }
+
+
+  tasks:
+
+  - name: "Disable signup in Gitlab instance."
+    uri: 
+      url: "http://{{GITLAB_HOST}}/api/v4/application/settings?signup_enabled=false"
+      method: PUT
+      status_code: 200
+      headers:
+        PRIVATE-TOKEN: "{{GITLAB_ACCESS_KEY}}"
+
+
+  - name: Create 'code-keeper' group
+    uri:
+      url: "http://{{GITLAB_HOST}}/api/v4/groups"
+      method: POST
+      status_code: 201  # Expected status code for successful creation
+      body_format: json
+      body: |
+        {
+          "name": "code-keeper",
+          "path": "code-keeper"
+        }
+      headers:
+        PRIVATE-TOKEN: "{{GITLAB_ACCESS_KEY}}"
+    register: group_res # group_res.json.id
+
+  - name: Generate GitLab Token
+    uri:
+        url: "http://{{GITLAB_HOST}}/api/v4/groups/{{ group_res.json.id }}/access_tokens"
+        status_code: 201
+        method: POST
+        headers:
+          PRIVATE-TOKEN: "{{ GITLAB_ACCESS_KEY }}"
+          Content-Type: application/json
+        body_format: json
+        body: |
+          {
+            "name": "admin-token",
+            "scopes":["api", "read_repository"],
+            "expires_at": "2024-09-05",
+            "access_level": "50"
+          }
+        return_content: yes
+    register: gitlab_token_response
+
+  - name: Create 'inventory-app' repo under 'code-keeper' 
+    uri:
+      url: "http://{{GITLAB_HOST}}/api/v4/projects?name=inventory-app&namespace_id={{group_res.json.id}}"
+      method: POST
+      status_code: 201  # Expected status code for successful creation
+      headers:
+        PRIVATE-TOKEN: "{{GITLAB_ACCESS_KEY}}"
+
+  - name: Create 'billing-app' repo under 'code-keeper' 
+    uri:
+      url: "http://{{GITLAB_HOST}}/api/v4/projects?name=billing-app&namespace_id={{group_res.json.id}}"
+      method: POST
+      status_code: 201  # Expected status code for successful creation
+      headers:
+        PRIVATE-TOKEN: "{{GITLAB_ACCESS_KEY}}"
+
+  - name: Create 'api-gateway' repo under 'code-keeper' 
+    uri:
+      url: "http://{{GITLAB_HOST}}/api/v4/projects?name=api-gateway&namespace_id={{group_res.json.id}}"
+      method: POST
+      status_code: 201  # Expected status code for successful creation
+      headers:
+        PRIVATE-TOKEN: "{{GITLAB_ACCESS_KEY}}"
+    
+  - name: Create 'infrastructure' repo under 'code-keeper' 
+    uri:
+      url: "http://{{GITLAB_HOST}}/api/v4/projects?name=infrastructure&namespace_id={{group_res.json.id}}"
+      method: POST
+      status_code: 201  # Expected status code for successful creation
+      headers:
+        PRIVATE-TOKEN: "{{GITLAB_ACCESS_KEY}}"
+
+  - name: Create GitLab Group-Level Variables
+    uri:
+        url: "http://{{GITLAB_HOST}}/api/v4/groups/{{ group_res.json.id }}/variables"
+        method: POST
+        status_code: 201
+        body_format: form-urlencoded
+        body:
+          key: "{{ item.key }}"
+          value: "{{ item.value }}"
+          protected: "{{ item.protected }}"
+          description: "{{ item.description }}"
+        headers:
+          PRIVATE-TOKEN: "{{GITLAB_ACCESS_KEY}}"
+    with_items: "{{ variables_to_create }}"
+
+  - name: Read content of SSH .pem file
+
+    shell: cat "{{ SSH_PEM_FILE }}"
+    register: ssh_pem_file_content
+    changed_when: false
+
+
+  - name: Upload .pem file to GitLab
+    uri:
+      url: "http://{{GITLAB_HOST}}/api/v4/groups/{{ group_res.json.id }}/variables"
+      method: POST
+      status_code: 201
+      headers:
+        PRIVATE-TOKEN: "{{ GITLAB_ACCESS_KEY }}"
+      body_format: form-urlencoded
+      body:
+        key: "SSH_PEM_FILE"
+        value: "{{ssh_pem_file_content.stdout}}"
+        variable_type: "file"

@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-exporter-monitor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: node-exporter-monitor
+  template:
+    metadata:
+      labels:
+        app: node-exporter-monitor
+    spec:
+      nodeSelector:
+        node-type: monitoring
+      containers:
+        - name: node-exporter-monitor
+          image: bitnami/node-exporter:1.6.1 # Update to the desired version
+          ports:
+            - name: metrics
+              containerPort: 9100

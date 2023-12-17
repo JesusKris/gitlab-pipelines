@@ -1,0 +1,111 @@
+- name: Setting up environment and Gitlab instance + runner using Docker
+  become: yes
+  vars:
+    gitlab_instance_image: gitlab/gitlab-ce:16.3.0-ce.0
+    gitlab_runner_image: gitlab/gitlab-runner:alpine3.17
+  vars_files:
+    - ./env.json
+  hosts: "{{GITLAB_HOST}}"
+  tasks:
+
+  # GITLAB RUNNERS CI & CD
+
+    - name: Start GitLab CI Runner Docker container
+      run_once: true
+      docker_container:
+        name: gitlab_ci_runner_container
+        image: "{{ gitlab_runner_image }}" # Use the custom network
+        networks:
+          - name: host 
+        volumes:
+          - "{{ GITLAB_HOME }}/ci-runner/config:/etc/gitlab-runner"
+          - "/var/run/docker.sock:/var/run/docker.sock"
+
+    - name: Start GitLab CD Runner Docker container
+      run_once: true
+      docker_container:
+        name: gitlab_cd_runner_container
+        image: "{{ gitlab_runner_image }}" # Use the custom network
+        networks:
+          - name: host 
+        volumes:
+          - "{{ GITLAB_HOME }}/cd-runner/config:/etc/gitlab-runner"
+          - "/var/run/docker.sock:/var/run/docker.sock"
+
+    - name: Start GitLab Docker Runner Docker container
+      run_once: true
+      docker_container:
+        name: gitlab_docker_runner_container
+        image: "{{ gitlab_runner_image }}" # Use the custom network
+        networks:
+          - name: host 
+        volumes:
+          - "{{ GITLAB_HOME }}/docker-runner/config:/etc/gitlab-runner"
+          - "/var/run/docker.sock:/var/run/docker.sock"
+
+
+  # GITLAB INSTANCE
+
+      
+    - name: Start GitLab instance Docker container
+      run_once: true
+      docker_container:
+        name: gitlab_instance_container
+        image: "{{gitlab_instance_image}}"
+        networks:
+          - name: host
+        hostname: "{{ GITLAB_HOST }}"
+        env:
+          GITLAB_OMNIBUS_CONFIG: |
+            external_url 'http://{{GITLAB_HOST}}'; gitlab_rails['gitlab_shell_ssh_port'] = {{ GITLAB_SSH_PORT }}
+          GITLAB_ROOT_PASSWORD: "{{ GITLAB_ROOT_PASSWORD }}"
+          GITLAB_SHARED_RUNNERS_REGISTRATION_TOKEN: "{{ GITLAB_SHARED_RUNNERS_REGISTRATION_TOKEN }}"  # Correct variable reference
+        volumes:
+          - "{{ GITLAB_HOME }}/config:/etc/gitlab"
+          - "{{ GITLAB_HOME }}/logs:/var/log/gitlab"
+          - "{{ GITLAB_HOME }}/data:/var/opt/gitlab"
+        shm_size: 256m
+
+    - name: Wait for GitLab instance container to be available
+      wait_for:
+        host: "{{ GITLAB_HOST }}"
+        port: 80  # Adjust the port as needed
+        state: started
+      delegate_to: "{{ GITLAB_HOST }}"
+      retries: 30  # Adjust the number of retries as needed
+      delay: 10   # Adjust the delay between retries as needed
+
+
+
+  # REGISTER RUNNERS CI & CD
+
+    - name: Register Gitlab CI Runner
+      run_once: true
+      command: >
+        docker exec gitlab_ci_runner_container bash -c 'gitlab-runner register --non-interactive --url "http://{{ GITLAB_HOST }}/" --registration-token "{{ GITLAB_SHARED_RUNNERS_REGISTRATION_TOKEN }}" --name "ci-runner" --tag-list build --executor "docker" --docker-image ruby:2.7'
+
+    - name: Add network config to Gitlab CI Runner
+      run_once: true
+      command: >
+          docker exec gitlab_ci_runner_container bash -c 'echo "    network_mode = \"host\"" >> /etc/gitlab-runner/config.toml'
+
+
+    - name: Register Gitlab CD Runner
+      run_once: true
+      command: >
+        docker exec gitlab_cd_runner_container bash -c 'gitlab-runner register --non-interactive --url "http://{{ GITLAB_HOST }}/" --registration-token "{{ GITLAB_SHARED_RUNNERS_REGISTRATION_TOKEN }}" --name "cd-runner" --tag-list deploy --executor "docker" --docker-image ruby:2.7'
+
+    - name: Add network config to Gitlab CD Runner
+      run_once: true
+      command: >
+          docker exec gitlab_cd_runner_container bash -c 'echo "    network_mode = \"host\"" >> /etc/gitlab-runner/config.toml'
+  
+    - name: Register Gitlab Docker Runner
+      run_once: true
+      command: >
+        docker exec gitlab_docker_runner_container bash -c 'gitlab-runner register --non-interactive --url "http://{{ GITLAB_HOST }}/" --registration-token "{{ GITLAB_SHARED_RUNNERS_REGISTRATION_TOKEN }}" --name "cd-runner" --tag-list docker --executor "docker" --docker-image "docker:24.0.5" --docker-privileged --docker-volumes "/certs/client"'
+
+    - name: Add network config to Gitlab Docker Runner
+      run_once: true
+      command: >
+          docker exec gitlab_docker_runner_container bash -c 'echo "    network_mode = \"host\"" >> /etc/gitlab-runner/config.toml'

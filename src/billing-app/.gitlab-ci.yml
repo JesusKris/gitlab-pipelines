@@ -1,0 +1,267 @@
+---
+# Pipeline will only trigger when something is pushed to main branch 
+workflow:  
+    rules:
+      - if: $CI_COMMIT_BRANCH != "main" && $CI_PIPELINE_SOURCE != "merge_request_event"
+        when: never
+      - when: always
+
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
+
+sast:
+  before_script: []
+  stage: scan
+  tags:
+    - build
+
+image:
+  name: node:20-buster
+  entrypoint: [""]
+
+
+stages:
+  - build
+  - test
+  - scan
+  - containerization
+  - deploy_to_staging
+  - deploy_to_prod
+
+
+build_billing_app:
+  before_script:
+    - cd ./app
+    - npm install
+    - npm install pm2 -g
+  tags:
+    - build
+  stage: build
+  script:
+  - npm install
+  - npm install pm2 -g
+  only:
+    changes:
+      - "app/**/*"
+
+
+
+
+
+test_billing_app:
+  before_script:
+    - cd ./app
+    - npm install
+    - npm install pm2 -g
+
+  tags:
+    - build
+  stage: test
+  script:
+  - echo "Testing pm2"
+  - pm2 start server.js
+  only:
+    changes:
+      - "app/**/*"
+
+
+
+
+containerization_app:
+  before_script:
+    - cd ./app
+    - docker info
+  image: docker:20-dind
+  services:
+    - name: docker:20-dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_DRIVER: overlay
+    DOCKER_HOST: tcp://127.0.0.1:2375/
+    DOCKER_TLS_CERTDIR: ""
+  tags:
+    - docker
+  stage: containerization
+  script:
+    - docker login docker.io --username ${DOCKER_USERNAME} --password ${DOCKER_ACCESS_TOKEN}
+    - docker build -t ${DOCKER_USERNAME}/billing-app:latest .
+    - docker push ${DOCKER_USERNAME}/billing-app:latest
+  only:
+    changes:
+      - "app/**/*"
+
+containerization_db:
+  before_script:
+    - cd ./db
+    - docker info
+  image: docker:20-dind
+  services:
+    - name: docker:20-dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_DRIVER: overlay
+    DOCKER_HOST: tcp://127.0.0.1:2375/
+    DOCKER_TLS_CERTDIR: ""
+  tags:
+    - docker
+  stage: containerization
+  script:
+    - docker login docker.io --username ${DOCKER_USERNAME} --password ${DOCKER_ACCESS_TOKEN}
+    - docker build -t ${DOCKER_USERNAME}/billing-database:latest .
+    - docker push ${DOCKER_USERNAME}/billing-database:latest
+  only:
+    changes:
+      - "db/**/*"
+
+containerization_rabbitmq:
+  before_script:
+    - cd ./rabbitmq
+    - docker info
+  image: docker:20-dind
+  services:
+    - name: docker:20-dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_DRIVER: overlay
+    DOCKER_HOST: tcp://127.0.0.1:2375/
+    DOCKER_TLS_CERTDIR: ""
+  tags:
+    - docker
+  stage: containerization
+  script:
+    - docker login docker.io --username ${DOCKER_USERNAME} --password ${DOCKER_ACCESS_TOKEN}
+    - docker build -t ${DOCKER_USERNAME}/rabbitmq:latest .
+    - docker push ${DOCKER_USERNAME}/rabbitmq:latest
+  only:
+    changes:
+      - "rabbitmq/**/*"
+
+
+
+
+deploy_to_staging_app:
+  tags:
+    - deploy
+  stage: deploy_to_staging
+  image: alpine:latest
+  before_script:  
+    - |
+      if [ -z "$STAGING_MASTER_IP" ]; then
+        echo "Error: STAGING ENV IS NOT RUNNING. PLEASE START THE INFRASTRUCTURE"
+        exit 1
+      fi
+  script:
+    - apk update
+    - apk add openssh
+    - chmod 600 ${SSH_PEM_FILE}
+    - ssh -o StrictHostKeyChecking=no -i ${SSH_PEM_FILE} ubuntu@${STAGING_MASTER_IP} 'kubectl rollout restart statefulset/billing-app-statefulset'
+  only:
+    changes:
+      - "app/**/*"
+
+deploy_to_staging_db:
+  tags:
+    - deploy
+  stage: deploy_to_staging
+  image: alpine:latest
+  before_script:  
+    - |
+      if [ -z "$STAGING_MASTER_IP" ]; then
+        echo "Error: STAGING ENV IS NOT RUNNING. PLEASE START THE INFRASTRUCTURE"
+        exit 1
+      fi
+  script:
+    - apk update
+    - apk add openssh
+    - chmod 600 ${SSH_PEM_FILE}
+    - ssh -o StrictHostKeyChecking=no -i ${SSH_PEM_FILE} ubuntu@${STAGING_MASTER_IP} 'kubectl rollout restart statefulset/billing-app-db-statefulset'
+  only:
+    changes:
+      - "db/**/*"
+
+deploy_to_staging_rabbitmq:
+  tags:
+    - deploy
+  stage: deploy_to_staging
+  image: alpine:latest
+  before_script:  
+    - |
+      if [ -z "$STAGING_MASTER_IP" ]; then
+        echo "Error: STAGING ENV IS NOT RUNNING. PLEASE START THE INFRASTRUCTURE"
+        exit 1
+      fi
+  script:
+    - apk update
+    - apk add openssh
+    - chmod 600 ${SSH_PEM_FILE}
+    - ssh -o StrictHostKeyChecking=no -i ${SSH_PEM_FILE} ubuntu@${STAGING_MASTER_IP} 'kubectl rollout restart deployment/rabbitmq-deployment'
+  only:
+    changes:
+      - "rabbitmq/**/*"
+
+
+
+
+deploy_to_prod_app:
+  tags:
+    - deploy
+  stage: deploy_to_prod
+  image: alpine:latest
+  before_script:  
+    - |
+      if [ -z "$PROD_MASTER_IP" ]; then
+        echo "Error: PROD ENV IS NOT RUNNING. PLEASE START THE INFRASTRUCTURE"
+        exit 1
+      fi
+  script:
+    - apk update
+    - apk add openssh
+    - chmod 600 ${SSH_PEM_FILE}
+    - ssh -o StrictHostKeyChecking=no -i ${SSH_PEM_FILE} ubuntu@${STAGING_MASTER_IP} 'kubectl rollout restart statefulset/billing-app-statefulset'
+  only:
+    changes:
+      - "app/**/*"
+  when: manual
+
+deploy_to_prod_db:
+  tags:
+    - deploy
+  stage: deploy_to_prod
+  image: alpine:latest
+  before_script:  
+    - |
+      if [ -z "$PROD_MASTER_IP" ]; then
+        echo "Error: PROD ENV IS NOT RUNNING. PLEASE START THE INFRASTRUCTURE"
+        exit 1
+      fi
+  script:
+    - apk update
+    - apk add openssh
+    - chmod 600 ${SSH_PEM_FILE}
+    - ssh -o StrictHostKeyChecking=no -i ${SSH_PEM_FILE} ubuntu@${STAGING_MASTER_IP} 'kubectl rollout restart statefulset/billing-app-db-statefulset'
+  only:
+    changes:
+      - "db/**/*"
+  when: manual
+
+deploy_to_prod_rabbitmq:
+  tags:
+    - deploy
+  stage: deploy_to_prod
+  image: alpine:latest
+  before_script:  
+    - |
+      if [ -z "$PROD_MASTER_IP" ]; then
+        echo "Error: PROD ENV IS NOT RUNNING. PLEASE START THE INFRASTRUCTURE"
+        exit 1
+      fi
+  script:
+    - apk update
+    - apk add openssh
+    - chmod 600 ${SSH_PEM_FILE}
+    - ssh -o StrictHostKeyChecking=no -i ${SSH_PEM_FILE} ubuntu@${STAGING_MASTER_IP} 'kubectl rollout restart deployment/rabbitmq-deployment'
+  only:
+    changes:
+      - "rabbitmq/**/*"
+  when: manual

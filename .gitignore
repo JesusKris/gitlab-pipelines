@@ -1,0 +1,33 @@
+env.json
+/example_repos
+.vscode
+
+.vagrant
+.env
+*.pem
+
+# Compiled files
+*.tfstate
+*.tfstate.backup
+*.tfplan
+
+# Module directories
+/modules/*
+
+# Exclude any local configuration files
+*.tfvars
+
+# Crash log files
+crash.log
+
+# Ignore override files as they are usually used to override resources locally and do not need to be committed
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
+.terraform
+.terraform.lock.hcl

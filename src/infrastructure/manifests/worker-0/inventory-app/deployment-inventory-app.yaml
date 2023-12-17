@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-app-deployment
+spec:
+  selector:
+    matchLabels:
+      app: inventory-app-deployment
+  template:
+    metadata:
+      labels:
+        app: inventory-app-deployment
+    spec:
+      containers:
+        - name: inventory-app-container
+          image: jesuskris/inventory-app:latest
+          resources:
+          env:
+            - name: POSTGRES_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: POSTGRES_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: POSTGRES_PASSWORD
+            - name: INVENTORY_POSTGRES_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: INVENTORY_POSTGRES_DATABASE
+            - name: INVENTORY_POSTGRES_DATABASE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: INVENTORY_POSTGRES_DATABASE_HOST
+            - name: EXPRESS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: inventory-app-configmap
+                  key: EXPRESS_PORT
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.28
+          command: ['/bin/sh', '-c', 'until nslookup inventory-app-db-service; do echo waiting for PostgreSQL; sleep 2; done;']
+        - name: wait-for-rabbitmq
+          image: busybox:1.28
+          command: ['/bin/sh', '-c', 'until nslookup rabbitmq-service; do echo waiting for RabbitMQ; sleep 2; done;']
+      nodeSelector:
+        node-type: worker-0

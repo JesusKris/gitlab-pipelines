@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-gateway-configmap
+data:
+  API_VERSION: "1.0.4"
+  API_RATELIMIT_MAX: "40"
+  API_RATELIMIT_DURATION: "1000"
+  EXPRESS_PORT: "1024"
+  BILLING_IP: "billing-app-service.default.svc.cluster.local"
+  MOVIES_IP: "inventory-app-service.default.svc.cluster.local"
+  

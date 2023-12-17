@@ -1,0 +1,209 @@
+---
+# Pipeline will only trigger when something is pushed to main branch 
+workflow:  
+    rules:
+      - if: $CI_COMMIT_BRANCH != "main" && $CI_PIPELINE_SOURCE != "merge_request_event"
+        when: never
+      - when: always
+
+include:
+  - template: Jobs/SAST-IaC.gitlab-ci.yml
+  - template: Jobs/SAST.gitlab-ci.yml
+
+# GLOBAL List of variables
+variables:
+  TF_VAR_stage_env: staging
+  ADDRESS: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${TF_VAR_stage_env}"
+
+# Stages of the pipeline
+stages:
+  - init
+  - validate
+  - plan
+  - provision_staging
+  - approve_to_production
+  - provision_production
+  - destroy_production
+  - destroy_staging
+
+# GLOBAL Image which will use in each stage
+image:
+  name: hashicorp/terraform:light
+  entrypoint: [""]
+
+# GLOBAL Script to be executed before each stage 
+before_script:
+  - terraform --version
+  - terraform init -backend-config=address=${ADDRESS} -backend-config=lock_address=${ADDRESS}/lock -backend-config=unlock_address=${ADDRESS}/lock -backend-config=username=root -backend-config=password=${GROUP_TOKEN} -backend-config=lock_method=POST -backend-config=unlock_method=DELETE -backend-config=retry_wait_min=5
+
+iac-sast:
+  before_script: []
+  stage: validate
+  tags:
+    - build
+
+sast:
+  before_script: []
+  stage: validate
+  tags:
+    - build
+
+# Verify init
+init:
+  before_script: []
+  tags:
+    - build
+  stage: init
+  script:
+  - terraform --version
+  - terraform init -backend-config=address=${ADDRESS} -backend-config=lock_address=${ADDRESS}/lock -backend-config=unlock_address=${ADDRESS}/lock -backend-config=username=root -backend-config=password=${GROUP_TOKEN} -backend-config=lock_method=POST -backend-config=unlock_method=DELETE -backend-config=retry_wait_min=5
+
+# Validate the Terraform files
+validate:
+  tags:
+    - build
+  stage: validate
+  script:
+    - terraform validate 
+  dependencies:              
+    - init
+
+#Show the future infrastructure plan
+plan:
+  tags:
+    - build
+  stage: plan
+  script:
+    - terraform plan
+  dependencies:
+    - validate
+
+#Provision staging env
+provision_staging:
+  tags:
+    - deploy
+  stage: provision_staging
+  script:
+    - apk update
+    - apk add curl openssh
+    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+    - kubectl version --client
+    - terraform apply  -auto-approve
+    - sleep 45
+    - chmod 600 ${SSH_PEM_FILE}
+    - scp -o StrictHostKeyChecking=no -v -i ${SSH_PEM_FILE} ubuntu@$(terraform output -raw master_public_ip):/etc/rancher/k3s/k3s.yaml .
+    - sed -i "s/127.0.0.1/$(terraform output -raw master_public_ip)/g" k3s.yaml
+    - export KUBECONFIG="${PWD}/k3s.yaml"
+    - kubectl apply --recursive -f manifests/
+  dependencies:
+    - plan
+
+export_staging_master_ip_variable:
+  tags:
+    - build
+  stage: provision_staging
+  dependencies:
+    - provision_staging
+  needs:
+    - provision_staging
+  script:
+    - apk update
+    - apk add curl
+    - >
+      curl --request POST --header "PRIVATE-TOKEN: ${GROUP_TOKEN}" "${CI_API_V4_URL}/groups/${CI_PROJECT_ROOT_NAMESPACE}/variables" --form "key=STAGING_MASTER_IP" --form "value=$(terraform output -raw master_public_ip)"
+  
+#Provision to production
+provision_production:
+  tags:
+    - deploy
+  stage: provision_production
+  variables:
+    TF_VAR_stage_env: production
+  script:
+    - apk update
+    - apk add curl openssh
+    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+    - kubectl version --client
+    - terraform apply  -auto-approve
+    - sleep 45
+    - chmod 600 ${SSH_PEM_FILE}
+    - scp -o StrictHostKeyChecking=no -v -i ${SSH_PEM_FILE} ubuntu@$(terraform output -raw master_public_ip):/etc/rancher/k3s/k3s.yaml .
+    - sed -i "s/127.0.0.1/$(terraform output -raw master_public_ip)/g" k3s.yaml
+    - export KUBECONFIG="${PWD}/k3s.yaml"
+    - kubectl apply --recursive -f manifests/
+
+  when: manual
+
+export_prod_master_ip_variable:
+  tags:
+    - build
+  stage: provision_production
+  variables:
+    TF_VAR_stage_env: production
+  dependencies:
+    - provision_production
+  needs:
+    - provision_production
+  script:
+    - apk update
+    - apk add curl
+    - >
+      curl --request POST --header "PRIVATE-TOKEN: ${GROUP_TOKEN}" "${CI_API_V4_URL}/groups/${CI_PROJECT_ROOT_NAMESPACE}/variables" --form "key=PROD_MASTER_IP" --form "value=$(terraform output -raw master_public_ip)"
+    
+
+# To destroy infrastructure on cloud. It needs manual approval 
+destroy_production:
+  tags:
+    - deploy
+  stage: destroy_production
+  variables:
+      TF_VAR_stage_env: production
+  script:
+    - terraform destroy  -auto-approve
+  dependencies:          
+    - provision_production
+  when: manual
+
+destroy_prod_master_ip_variable:
+  tags:
+    - build
+  stage: destroy_production
+  variables:
+      TF_VAR_stage_env: production
+  dependencies:
+    - destroy_production
+  needs:
+    - destroy_production
+  script:
+    - apk update
+    - apk add curl
+    - >
+      curl --request DELETE --header "PRIVATE-TOKEN: ${GROUP_TOKEN}" "${CI_API_V4_URL}/groups/${CI_PROJECT_ROOT_NAMESPACE}/variables/PROD_MASTER_IP" 
+
+
+# To destroy infrastructure on cloud. It needs manual approval 
+destroy_staging:
+  tags:
+    - deploy
+  stage: destroy_staging
+  script:
+    - terraform destroy  -auto-approve
+  dependencies:          
+    - provision_staging
+  when: manual
+
+destroy_staging_master_ip_variable:
+  tags:
+    - build
+  stage: destroy_staging
+  dependencies:
+    - destroy_staging
+  needs:
+    - destroy_staging
+  script:
+    - apk update
+    - apk add curl
+    - >
+      curl --request DELETE --header "PRIVATE-TOKEN: ${GROUP_TOKEN}" "${CI_API_V4_URL}/groups/${CI_PROJECT_ROOT_NAMESPACE}/variables/STAGING_MASTER_IP" 

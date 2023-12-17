@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: billing-app-statefulset
+spec:
+  selector:
+    matchLabels:
+      app: billing-app-statefulset
+  serviceName: billing-app-service
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: billing-app-statefulset
+    spec:
+      containers:
+        - name: billing-app-container
+          image: jesuskris/billing-app:latest
+          resources:
+          env:
+            - name: POSTGRES_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: POSTGRES_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: POSTGRES_PASSWORD
+            - name: BILLING_POSTGRES_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: BILLING_POSTGRES_DATABASE
+            - name: BILLING_POSTGRES_DATABASE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-secrets
+                  key: BILLING_POSTGRES_DATABASE_HOST
+            - name: EXPRESS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: billing-app-configmap
+                  key: EXPRESS_PORT
+            - name: RABBITMQ_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_PORT
+            - name: RABBITMQ_QUEUE
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_QUEUE
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_QUEUE
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_QUEUE
+            - name: RABBITMQ_IP
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secrets
+                  key: RABBITMQ_IP
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.28
+          command:
+            [
+              "/bin/sh",
+              "-c",
+              "until nslookup billing-app-db-service; do echo waiting for PostgreSQL; sleep 2; done;",
+            ]
+        - name: wait-for-rabbitmq
+          image: busybox:1.28
+          command:
+            [
+              "/bin/sh",
+              "-c",
+              "until nslookup rabbitmq-service; do echo waiting for RabbitMQ; sleep 2; done;",
+            ]
+      nodeSelector:
+        node-type: worker-0

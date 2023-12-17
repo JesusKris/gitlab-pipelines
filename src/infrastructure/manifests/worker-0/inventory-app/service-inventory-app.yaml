@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-app-service
+spec:
+  type: ClusterIP
+  selector:
+    app: inventory-app-deployment
+  ports:
+    - protocol: TCP
+      port: 1024
+      targetPort: 1024
